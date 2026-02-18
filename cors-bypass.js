@@ -1,16 +1,13 @@
 // cors-bypass.js - CORS সমস্যার সম্পূর্ণ সমাধান
 const CORSBypass = {
-    // মাল্টিপল CORS প্রক্সি (ফ্রি)
+    // মাল্টিপল CORS প্রক্সি সার্ভার (ফ্রি)
     proxyServers: [
         'https://cors-anywhere.herokuapp.com/',
         'https://api.allorigins.win/raw?url=',
         'https://cors-proxy.fringe.zone/',
-        'https://cors.bridged.cc/',
         'https://thingproxy.freeboard.io/fetch/',
-        'https://cors.eu.org/',
-        'https://cors.api-tools.workers.dev/?url=',
+        'https://cors.bridged.cc/',
         'https://proxy.cors.sh/',
-        'https://cors.5sos.us.kg/',
         'https://cors-proxy4.p.rapidapi.com/?url='
     ],
     
@@ -20,10 +17,7 @@ const CORSBypass = {
         createAccount: 'https://accounts.google.com/_/signup/webcreateaccount'
     },
     
-    // JSONP কলব্যাক ইনডেক্স
-    jsonpCallbackIndex: 0,
-    
-    // CORS বাইপাস সহ ফেচ
+    // ফেচ করার প্রধান ফাংশন
     async fetchWithBypass(url, options = {}) {
         // প্রথমে সরাসরি চেষ্টা
         try {
@@ -32,11 +26,16 @@ const CORSBypass = {
                 mode: 'cors',
                 credentials: 'omit',
                 headers: {
-                    ...options.headers,
-                    'Origin': window.location.origin
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Requested-With': 'XMLHttpRequest'
                 }
             });
-            if (response.ok) return response;
+            
+            if (response.ok) {
+                console.log('✅ Direct fetch successful');
+                return response;
+            }
         } catch (e) {
             console.log('Direct fetch failed, trying proxies...');
         }
@@ -45,10 +44,12 @@ const CORSBypass = {
         for (let proxy of this.proxyServers) {
             try {
                 const proxyUrl = proxy + encodeURIComponent(url);
+                
                 const response = await fetch(proxyUrl, {
                     ...options,
                     headers: {
-                        ...options.headers,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Accept': 'application/json, text/plain, */*',
                         'X-Requested-With': 'XMLHttpRequest',
                         'Origin': window.location.origin
                     }
@@ -64,41 +65,7 @@ const CORSBypass = {
             }
         }
         
-        // JSONP ফ্যালব্যাক
-        return this.jsonpFetch(url, options);
-    },
-    
-    // JSONP পদ্ধতি
-    jsonpFetch(url, options) {
-        return new Promise((resolve, reject) => {
-            const callbackName = 'jsonp_callback_' + (this.jsonpCallbackIndex++);
-            const script = document.createElement('script');
-            
-            const separator = url.includes('?') ? '&' : '?';
-            const jsonpUrl = url + separator + 'callback=' + callbackName;
-            
-            window[callbackName] = function(data) {
-                delete window[callbackName];
-                document.body.removeChild(script);
-                
-                const fakeResponse = {
-                    ok: true,
-                    status: 200,
-                    json: () => Promise.resolve(data),
-                    text: () => Promise.resolve(JSON.stringify(data))
-                };
-                resolve(fakeResponse);
-            };
-            
-            script.src = jsonpUrl;
-            script.onerror = () => {
-                delete window[callbackName];
-                document.body.removeChild(script);
-                reject(new Error('JSONP failed'));
-            };
-            
-            document.body.appendChild(script);
-        });
+        throw new Error('All CORS bypass methods failed');
     },
     
     // ইউজারনেম চেক
@@ -109,20 +76,30 @@ const CORSBypass = {
         
         const options = {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json'
-            },
             body: formData
         };
         
         try {
             const response = await this.fetchWithBypass(this.googleEndpoints.checkUsername, options);
             const text = await response.text();
-            return text.includes('VALID') || text.includes('valid') || text.includes('true');
+            
+            // গুগলের রেসপন্স পার্স
+            if (text.includes('VALID') || text.includes('valid')) {
+                return true;
+            }
+            
+            // JSON রেসপন্স পার্স করার চেষ্টা
+            try {
+                const jsonData = JSON.parse(text);
+                if (Array.isArray(jsonData) && jsonData[0] && jsonData[0][0] && jsonData[0][0][0] === 'VALID') {
+                    return true;
+                }
+            } catch (e) {}
+            
+            return false;
         } catch (error) {
             console.log('Username check error:', error);
-            return true;
+            return true; // অনিশ্চিত হলে ট্রাই করো
         }
     },
     
@@ -136,20 +113,45 @@ const CORSBypass = {
         
         const options = {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json'
-            },
             body: data
         };
         
         try {
             const response = await this.fetchWithBypass(this.googleEndpoints.createAccount, options);
             const text = await response.text();
+            
+            // সাফল্য চেক
+            if (text.includes('accountId') || 
+                text.includes('success') || 
+                text.includes('redirect') ||
+                text.includes('account_id')) {
+                return {
+                    success: true,
+                    response: text
+                };
+            }
+            
+            // ক্যাপচা চেক
+            if (text.includes('captcha') || text.includes('CAPTCHA')) {
+                return {
+                    success: false,
+                    error: 'CAPTCHA verification required'
+                };
+            }
+            
+            // ফোন ভেরিফিকেশন চেক
+            if (text.includes('phone') && text.includes('verification')) {
+                return {
+                    success: false,
+                    error: 'Phone verification required'
+                };
+            }
+            
             return {
-                success: text.includes('accountId') || text.includes('success') || text.includes('redirect'),
-                response: text
+                success: false,
+                error: 'Account creation failed'
             };
+            
         } catch (error) {
             return {
                 success: false,
