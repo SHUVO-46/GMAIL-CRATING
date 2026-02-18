@@ -7,9 +7,10 @@ class GmailEngine {
         this.stats = {
             total: 0,
             success: 0,
-            failed: 0
+            failed: 0,
+            captcha: 0,
+            phoneRequired: 0
         };
-        this.currentProxy = null;
         this.bypass = window.CORSBypass;
     }
     
@@ -30,6 +31,7 @@ class GmailEngine {
                 this.userAgents = UserAgentGenerator.getUserAgents();
             }
             
+            console.log('✅ Engine initialized');
             return this;
         } catch (error) {
             console.error('Init error:', error);
@@ -42,28 +44,45 @@ class GmailEngine {
         return await this.bypass.checkUsername(username);
     }
     
-    async createGmail(firstName, lastName, username, password, birthYear) {
+    generateBirthData() {
+        const month = Math.floor(1 + Math.random() * 12);
+        const day = Math.floor(1 + Math.random() * 28);
+        const year = Math.floor(1980 + Math.random() * 25);
+        const gender = Math.floor(1 + Math.random() * 3);
+        
+        return { month, day, year, gender };
+    }
+    
+    async createGmail(firstName, lastName, username, password) {
         this.stats.total++;
         
         try {
-            // ইউজারনেম প্রস্তুত
+            // ইউজারনেম ক্লিন
             let finalUsername = username.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (finalUsername.length < 3) {
+                finalUsername = 'user' + finalUsername;
+            }
             
             // ইউজারনেম চেক
             let available = await this.checkUsername(finalUsername);
+            let attempts = 0;
             
-            if (!available) {
-                finalUsername = finalUsername + Math.floor(100 + Math.random() * 900);
+            while (!available && attempts < 5) {
+                finalUsername = finalUsername + Math.floor(10 + Math.random() * 90);
                 available = await this.checkUsername(finalUsername);
-                if (!available) {
-                    throw new Error('Username not available');
-                }
+                attempts++;
             }
             
-            // র‍্যান্ডম ডাটা
-            const month = Math.floor(1 + Math.random() * 12);
-            const day = Math.floor(1 + Math.random() * 28);
-            const gender = Math.floor(1 + Math.random() * 3);
+            if (!available) {
+                this.stats.failed++;
+                return {
+                    success: false,
+                    error: 'Username not available after multiple attempts'
+                };
+            }
+            
+            // জন্ম তারিখ জেনারেট
+            const birth = this.generateBirthData();
             
             // ফর্ম ডাটা প্রস্তুত
             const formData = {
@@ -72,10 +91,10 @@ class GmailEngine {
                 username: finalUsername,
                 password: password,
                 confirmPassword: password,
-                month: month.toString(),
-                day: day.toString(),
-                year: birthYear,
-                gender: gender.toString(),
+                month: birth.month.toString(),
+                day: birth.day.toString(),
+                year: birth.year.toString(),
+                gender: birth.gender.toString(),
                 recoveryEmail: '',
                 phoneCountryCode: 'US',
                 phoneNumber: '',
@@ -90,11 +109,20 @@ class GmailEngine {
                 return {
                     success: true,
                     email: `${finalUsername}@gmail.com`,
-                    password: password,
-                    device: 'Generic Device'
+                    password: password
                 };
             } else {
-                throw new Error(result.error || 'Creation failed');
+                if (result.error.includes('CAPTCHA')) {
+                    this.stats.captcha++;
+                } else if (result.error.includes('Phone')) {
+                    this.stats.phoneRequired++;
+                }
+                
+                this.stats.failed++;
+                return {
+                    success: false,
+                    error: result.error
+                };
             }
             
         } catch (error) {
@@ -109,6 +137,13 @@ class GmailEngine {
     getSuccessRate() {
         if (this.stats.total === 0) return '0%';
         return ((this.stats.success / this.stats.total) * 100).toFixed(1) + '%';
+    }
+    
+    getStats() {
+        return {
+            ...this.stats,
+            successRate: this.getSuccessRate()
+        };
     }
 }
 
