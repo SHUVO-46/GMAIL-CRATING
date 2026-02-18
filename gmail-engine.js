@@ -1,4 +1,4 @@
-// gmail-engine.js - CORS ফিক্স সহ আপডেটেড ভার্সন
+// gmail-engine.js - মেইন ইঞ্জিন
 class GmailEngine {
     constructor() {
         this.proxies = [];
@@ -10,23 +10,25 @@ class GmailEngine {
             failed: 0
         };
         this.currentProxy = null;
-        this.currentFingerprint = null;
         this.bypass = window.CORSBypass;
     }
     
     async init() {
         try {
             // প্রক্সি লোড
-            this.proxies = await ProxyList.getProxies();
+            if (window.ProxyList) {
+                this.proxies = await ProxyList.getProxies();
+            }
             
             // ডিভাইস লোড
-            this.devices = FingerprintGenerator.getDevices();
+            if (window.FingerprintGenerator) {
+                this.devices = FingerprintGenerator.getDevices();
+            }
             
             // ইউজার এজেন্ট লোড
-            this.userAgents = UserAgentGenerator.getUserAgents();
-            
-            // CORS বাইপাস চেক
-            console.log('✅ CORS Bypass ready');
+            if (window.UserAgentGenerator) {
+                this.userAgents = UserAgentGenerator.getUserAgents();
+            }
             
             return this;
         } catch (error) {
@@ -36,6 +38,7 @@ class GmailEngine {
     }
     
     async checkUsername(username) {
+        if (!this.bypass) return true;
         return await this.bypass.checkUsername(username);
     }
     
@@ -43,20 +46,26 @@ class GmailEngine {
         this.stats.total++;
         
         try {
-            // ইউজারনেম চেক
+            // ইউজারনেম প্রস্তুত
             let finalUsername = username.toLowerCase().replace(/[^a-z0-9]/g, '');
+            
+            // ইউজারনেম চেক
             let available = await this.checkUsername(finalUsername);
             
             if (!available) {
                 finalUsername = finalUsername + Math.floor(100 + Math.random() * 900);
                 available = await this.checkUsername(finalUsername);
+                if (!available) {
+                    throw new Error('Username not available');
+                }
             }
             
-            // সাইনআপ ডাটা প্রস্তুত
+            // র‍্যান্ডম ডাটা
             const month = Math.floor(1 + Math.random() * 12);
             const day = Math.floor(1 + Math.random() * 28);
             const gender = Math.floor(1 + Math.random() * 3);
             
+            // ফর্ম ডাটা প্রস্তুত
             const formData = {
                 firstName: firstName,
                 lastName: lastName,
@@ -73,7 +82,7 @@ class GmailEngine {
                 skipPhoneVerification: 'true'
             };
             
-            // একাউন্ট ক্রিয়েট
+            // একাউন্ট তৈরি
             const result = await this.bypass.createAccount(formData);
             
             if (result.success) {
